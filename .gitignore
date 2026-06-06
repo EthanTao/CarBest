@@ -1,0 +1,23 @@
+# Ignore build artifacts and IDE files
+*.lnp
+*.crf
+*.lst
+*.hex
+*.elf
+*.map
+*.bin
+*.uvproj
+*.uvopt
+PWM
+list/
+.vs/
+.vscode/
+*.o
+*.axf
+*.log
+
+# backup and temp
+*~
+*.tmp
+Thumbs.db
+.
