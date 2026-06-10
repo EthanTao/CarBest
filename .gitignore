@@ -1,0 +1,10 @@
+# Keil IDE user-specific files
+PWM.uvgui.*
+PWM.uvopt
+
+# Build outputs
+list/
+*.hex
+*.lnp
+*.map
+*.build_log.htm
