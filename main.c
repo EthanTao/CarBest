@@ -80,7 +80,7 @@ bit PWM6_Flag;
 #define MAX_PWM             92      /* PWM最大限幅 */
 #define MIN_RUN_PWM         60      /* 非停车正转时最低PWM */
 #define LEFT_TRIM           2       /* 宸﹁疆骞宠　鍋忕疆,鑼冨洿-10~10 */
-#define RIGHT_TRIM          0       /* 鍙宠疆骞宠　鍋忕疆,鑼冨洿-10~10 */
+#define RIGHT_TRIM          4       /* 鍙宠疆骞宠　鍋忕疆,鑼冨洿-10~10 */
 #define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
 
 #define HOLD_CURRENT_MS     110     /* 维持当前电机输出 */
