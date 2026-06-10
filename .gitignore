@@ -1,0 +1,19 @@
+# Build artifacts
+*.crf
+*.lst
+*.obj
+*.hex
+*.lnp
+*.map
+*.build_log.htm
+*.bak
+
+# IDE files
+.vscode/
+.idea/
+*.uvproj
+*.uvopt
+*.uvgui.*
+
+# Build output directory
+list/
