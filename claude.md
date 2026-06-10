@@ -95,12 +95,12 @@ bit, sbit       // 位定义和位引脚（51内核）
 ### 机械偏置（补偿电机不对称）
 
 ```c
-#define LEFT_TRIM     4    // 左轮平衡偏置，范围-10~10
-#define RIGHT_TRIM    0    // 右轮平衡偏置，范围-10~10
+#define LEFT_TRIM     2    // 左轮平衡偏置，范围-10~10
+#define RIGHT_TRIM    4    // 右轮平衡偏置，范围-10~10
 ```
 
 > **调整原则**: 车往左偏 → 左轮慢/右轮快 → 加大LEFT_TRIM或减小RIGHT_TRIM
-> 当前值来自实测：右轮偏快，把原来RIGHT_TRIM=6挪到LEFT_TRIM=4
+> 当前值来自实测：右轮偏快，经过多轮测试调整为 LEFT_TRIM=2, RIGHT_TRIM=4
 
 ### PID 循迹参数
 
@@ -179,7 +179,7 @@ Track_Control() [每1ms调用一次]
 - 车往**左**偏 → 右轮太快 → 减小RIGHT_TRIM 或 加大LEFT_TRIM
 - 车往**右**偏 → 左轮太快 → 加大RIGHT_TRIM 或 减小LEFT_TRIM
 
-当前值: `LEFT_TRIM=4, RIGHT_TRIM=0`
+当前值: `LEFT_TRIM=2, RIGHT_TRIM=4`
 
 ### 3. 调试PID参数
 
