@@ -78,7 +78,8 @@ bit PWM6_Flag;
 #define BASE_FAST           85      /* 00100直行速度 */
 #define BASE_NODE           78      /* 十字判定后仍压在线上时的直行速度 */
 #define MAX_PWM             92      /* PWM最大限幅 */
-#define MIN_RUN_PWM         60      /* 非停车正转时最低PWM */
+#define MIN_RUN_PWM         55      /* 非停车正转时最低PWM */
+#define STALL_MARGIN        10       /* 低压防停转余量 */
 #define LEFT_TRIM           2       /* 左轮平衡偏置，范围-10~10 */
 #define RIGHT_TRIM          4       /* 右轮平衡偏置，范围-10~10 */
 #define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
@@ -226,9 +227,11 @@ void Track_PIDControl(u8 mask)
 	left_pwm  = LimitPwm(left_pwm + LEFT_TRIM);
 	right_pwm = LimitPwm(right_pwm + RIGHT_TRIM);
 
-	/* 最低速度保护 */
-	if(left_pwm < MIN_RUN_PWM)  left_pwm = MIN_RUN_PWM;
-	if(right_pwm < MIN_RUN_PWM) right_pwm = MIN_RUN_PWM;
+	/* 最低速度保护 + 低压防停转余量 */
+	if(left_pwm < MIN_RUN_PWM + STALL_MARGIN)
+		left_pwm = MIN_RUN_PWM + STALL_MARGIN;
+	if(right_pwm < MIN_RUN_PWM + STALL_MARGIN)
+		right_pwm = MIN_RUN_PWM + STALL_MARGIN;
 
 	Motor_RunSigned(left_pwm, right_pwm);
 
@@ -544,7 +547,8 @@ void Motor_RunSafe(int left_pwm, int right_pwm)
 	right_pwm = LimitPwm(right_pwm);
 
 	if(left_pwm < MIN_RUN_PWM) left_pwm = MIN_RUN_PWM;
-	if(right_pwm < MIN_RUN_PWM) right_pwm = MIN_RUN_PWM;
+	if(right_pwm < MIN_RUN_PWM + STALL_MARGIN)
+		right_pwm = MIN_RUN_PWM + STALL_MARGIN;
 
 	Motor_RunSigned(left_pwm, right_pwm);
 }
