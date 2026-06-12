@@ -91,14 +91,14 @@ bit PWM6_Flag;
 #define MICRO_OUTER_PWM     85      /* 微型修正外侧轮速度 */
 #define MICRO_INNER_PWM     80      /* 微型修正内侧轮速度 */
 #define MICRO_TO_SHARP_TICKS 20     /* 小修后允许大修抢占的时间 */
-#define CENTER_SHARP_WINDOW_TICKS 15 /* 中线和外侧传感器组合触发大弯的时间窗口 */
+#define CENTER_SHARP_WINDOW_TICKS 20 /* 中线和外侧传感器组合触发大弯的时间窗口 */
 #define MICRO_DIR_NONE       0
 #define MICRO_DIR_LEFT      -1
 #define MICRO_DIR_RIGHT      1
 
-#define SHARP_FORWARD_PWM   75      /* 大型转弯正转轮速度 */
+#define SHARP_FORWARD_PWM   70      /* 大型转弯正转轮速度 */
 #define SHARP_REVERSE_PWM   90      /* 大型转弯反转轮速度 */
-#define SHARP_MIN_PIVOT_TICKS 50    /* 大型修正最短强转时间 */
+#define SHARP_MIN_PIVOT_TICKS 70    /* 大型修正最短强转时间 */
 
 /* PID 循迹控制参数 */
 #define PID_KP              6      /* 比例系数 */
@@ -854,7 +854,7 @@ void Track_Control(void)
 
 		case TRACK_SHARP_LEFT:
 			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpLeft(mask) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
+			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpLeft(mask) && !(mask & MASK_ZUO2) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
 			{
 				Track_EnterState(TRACK_FOLLOW);
 				Track_NormalControl(mask, count);
@@ -867,7 +867,7 @@ void Track_Control(void)
 
 		case TRACK_SHARP_RIGHT:
 			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpRight(mask) && (mask & (MASK_YOU1 | MASK_ZHONG)))
+			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpRight(mask) && !(mask & MASK_YOU2) && (mask & (MASK_YOU1 | MASK_ZHONG)))
 			{
 				Track_EnterState(TRACK_FOLLOW);
 				Track_NormalControl(mask, count);
