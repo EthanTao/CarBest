@@ -80,7 +80,7 @@ bit PWM6_Flag;
 #define MAX_PWM             92      /* PWM最大限幅 */
 #define MIN_RUN_PWM         55      /* 非停车正转时最低PWM */
 #define STALL_MARGIN        10       /* 低压防停转余量 */
-#define LEFT_TRIM           2       /* 左轮平衡偏置，范围-10~10 */
+#define LEFT_TRIM           1       /* 左轮平衡偏置，范围-10~10 */
 #define RIGHT_TRIM          3       /* 右轮平衡偏置，范围-10~10 */
 #define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
 
@@ -88,8 +88,8 @@ bit PWM6_Flag;
 #define CROSS_HOLD_MS       80      /* 十字路口直行保持时间 */
 #define UTURN_STOP_MS       500     /* 右掉头前停车时间 */
 
-#define MICRO_OUTER_PWM     85      /* 微型修正外侧轮速度 */
-#define MICRO_INNER_PWM     80      /* 微型修正内侧轮速度 */
+#define MICRO_OUTER_PWM     75      /* 微型修正外侧轮速度 */
+#define MICRO_INNER_PWM     70      /* 微型修正内侧轮速度 */
 #define MICRO_TO_SHARP_TICKS 20     /* 小修后允许大修抢占的时间 */
 #define CENTER_SHARP_WINDOW_TICKS 20 /* 中线和外侧传感器组合触发大弯的时间窗口 */
 #define MICRO_DIR_NONE       0
@@ -101,11 +101,11 @@ bit PWM6_Flag;
 #define SHARP_MIN_PIVOT_TICKS 70    /* 大型修正最短强转时间 */
 
 /* PID 循迹控制参数 */
-#define PID_KP              6      /* 比例系数 */
-#define PID_KI              1      /* 积分系数，消除稳态误差 */
+#define PID_KP              5      /* 比例系数 */
+#define PID_KI              2      /* 积分系数，消除稳态误差 */
 #define PID_KD              15     /* 微分系数,抑制震荡 */
-#define PID_INTEGRAL_MAX    30     /* 积分限幅,防止积分饱和 */
-#define PID_OUTPUT_MAX      30     /* PID单侧最大输出限幅 */
+#define PID_INTEGRAL_MAX    20    /* 积分限幅,防止积分饱和 */
+#define PID_OUTPUT_MAX      20	   /* PID单侧最大输出限幅 */
 
 #define UTURN_PWM           80      /* 右掉头左右轮等速反向速度 */
 
