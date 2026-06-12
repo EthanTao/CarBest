@@ -81,7 +81,7 @@ bit PWM6_Flag;
 #define MIN_RUN_PWM         55      /* 非停车正转时最低PWM */
 #define STALL_MARGIN        10       /* 低压防停转余量 */
 #define LEFT_TRIM           2       /* 左轮平衡偏置，范围-10~10 */
-#define RIGHT_TRIM          4       /* 右轮平衡偏置，范围-10~10 */
+#define RIGHT_TRIM          3       /* 右轮平衡偏置，范围-10~10 */
 #define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
 
 #define HOLD_CURRENT_MS     110     /* 维持当前电机输出 */
@@ -102,7 +102,7 @@ bit PWM6_Flag;
 
 /* PID 循迹控制参数 */
 #define PID_KP              6      /* 比例系数 */
-#define PID_KI              0      /* 积分系数 (0=暂不启用) */
+#define PID_KI              1      /* 积分系数，消除稳态误差 */
 #define PID_KD              15     /* 微分系数,抑制震荡 */
 #define PID_INTEGRAL_MAX    30     /* 积分限幅,防止积分饱和 */
 #define PID_OUTPUT_MAX      30     /* PID单侧最大输出限幅 */
