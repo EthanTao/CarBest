@@ -77,18 +77,18 @@ bit PWM6_Flag;
 
 #define BASE_FAST           85      /* 00100直行速度 */
 #define BASE_NODE           78      /* 十字判定后仍压在线上时的直行速度 */
-#define MAX_PWM             92      /* PWM最大限幅 */
+#define MAX_PWM             120      /* PWM最大限幅 */
 #define MIN_RUN_PWM         60      /* 非停车正转时最低PWM */
 #define LEFT_TRIM           0       /* 左轮配平，常用范围-10~10 */
 #define RIGHT_TRIM          6       /* 右轮配平，常用范围-10~10 */
 #define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
 
 #define HOLD_CURRENT_MS     110     /* 维持当前电机输出 */
-#define CROSS_HOLD_MS       80      /* 十字路口直行保持时间 */
+#define CROSS_HOLD_MS       100      /* 十字路口直行保持时间 */
 #define UTURN_STOP_MS       500     /* 右掉头前停车时间 */
 
 #define MICRO_OUTER_PWM     85      /* 微型修正外侧轮速度 */
-#define MICRO_INNER_PWM     80      /* 微型修正内侧轮速度 */
+#define MICRO_INNER_PWM     90      /* 微型修正内侧轮速度 */
 #define MICRO_TO_SHARP_TICKS 20     /* 小修后允许大修抢占的时间 */
 #define CENTER_SHARP_WINDOW_TICKS 15 /* 中线和外侧传感器组合触发大弯的时间窗口 */
 #define MICRO_DIR_NONE       0
@@ -96,12 +96,13 @@ bit PWM6_Flag;
 #define MICRO_DIR_RIGHT      1
 
 #define SHARP_FORWARD_PWM   75      /* 大型转弯正转轮速度 */
-#define SHARP_REVERSE_PWM   90      /* 大型转弯反转轮速度 */
-#define SHARP_MIN_PIVOT_TICKS 50    /* 大型修正最短强转时间 */
+#define SHARP_REVERSE_PWM    60     /* 大型转弯反转轮速度 */
+#define SHARP_MIN_PIVOT_TICKS 40    /* 大型修正最短强转时间 */
+#define CENTER_SHARP_MIN_PIVOT_TICKS 60 /* 中线+同侧外侧特殊大弯强转时间 */
 
-#define UTURN_PWM           80      /* 右掉头左右轮等速反向速度 */
+#define UTURN_PWM           70      /* 右掉头左右轮等速反向速度 */
 
-#define LOST_CONFIRM_TICKS  60     /* 预留：120*1ms=120ms */
+#define LOST_CONFIRM_TICKS  40     /* 预留 */
 #define LOST_STRAIGHT_TICKS 30     /* 短暂全白保持上一输出时间 */
 
 #define MASK_ZUO2           0x10    /* 1号传感器：最左 */
@@ -131,6 +132,7 @@ u8 micro_ticks = 0;
 u8 center_seen_ticks = CENTER_SHARP_WINDOW_TICKS + 1;
 u8 left_outer_seen_ticks = CENTER_SHARP_WINDOW_TICKS + 1;
 u8 right_outer_seen_ticks = CENTER_SHARP_WINDOW_TICKS + 1;
+u16 sharp_min_pivot_ticks = SHARP_MIN_PIVOT_TICKS;
 
 
 /*************	本地函数声明	**************/
@@ -159,8 +161,8 @@ u8 Track_ShouldMicroSharpLeft(u8 mask);
 u8 Track_ShouldMicroSharpRight(u8 mask);
 u8 Track_HandleLostUturn(u8 count);
 void Track_EnterState(u8 state);
-void Track_StartSharpLeft(void);
-void Track_StartSharpRight(void);
+void Track_StartSharpLeft(u16 min_pivot_ticks);
+void Track_StartSharpRight(u16 min_pivot_ticks);
 void Track_ResetStraight(void);
 void Track_NormalControl(u8 mask, u8 count);
 void Track_Control(void);
@@ -605,20 +607,22 @@ void Track_EnterState(u8 state)
 	track_state_ticks = 0;
 }
 
-void Track_StartSharpLeft(void)
+void Track_StartSharpLeft(u16 min_pivot_ticks)
 {
 	Track_ClearMicroWindow();
 	Track_ClearCenterSharpWindow();
 	last_error = -4;
+	sharp_min_pivot_ticks = min_pivot_ticks;
 	Track_EnterState(TRACK_SHARP_LEFT);
 	Motor_RunSigned(-SHARP_REVERSE_PWM, SHARP_FORWARD_PWM);
 }
 
-void Track_StartSharpRight(void)
+void Track_StartSharpRight(u16 min_pivot_ticks)
 {
 	Track_ClearMicroWindow();
 	Track_ClearCenterSharpWindow();
 	last_error = 4;
+	sharp_min_pivot_ticks = min_pivot_ticks;
 	Track_EnterState(TRACK_SHARP_RIGHT);
 	Motor_RunSigned(SHARP_FORWARD_PWM, -SHARP_REVERSE_PWM);
 }
@@ -651,12 +655,12 @@ void Track_NormalControl(u8 mask, u8 count)
 	/* 30ms内中线+同侧外侧组合时抢占为大幅修正 */
 	if(Track_ShouldCenterSharpLeft(mask))
 	{
-		Track_StartSharpLeft();
+		Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(Track_ShouldCenterSharpRight(mask))
 	{
-		Track_StartSharpRight();
+		Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 
@@ -679,42 +683,42 @@ void Track_NormalControl(u8 mask, u8 count)
 	/* 1xx00/00xx1：立即大弯，但低于掉头和十字直行 */
 	if(Track_IsImmediateSharpLeft(mask))
 	{
-		Track_StartSharpLeft();
+		Track_StartSharpLeft(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(Track_IsImmediateSharpRight(mask))
 	{
-		Track_StartSharpRight();
+		Track_StartSharpRight(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 
 	/* 小修后20ms内，同方向外侧触发时抢占为大幅修正 */
 	if(Track_ShouldMicroSharpLeft(mask))
 	{
-		Track_StartSharpLeft();
+		Track_StartSharpLeft(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(Track_ShouldMicroSharpRight(mask))
 	{
-		Track_StartSharpRight();
+		Track_StartSharpRight(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 
 	/* 大型修正：11000/10000左修，00011/00001右修，10001按上次方向 */
 	if(mask == (MASK_ZUO2 | MASK_YOU2))
 	{
-		if(last_error < 0) Track_StartSharpLeft();
-		else Track_StartSharpRight();
+		if(last_error < 0) Track_StartSharpLeft(SHARP_MIN_PIVOT_TICKS);
+		else Track_StartSharpRight(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(mask == MASK_ZUO2 || mask == (MASK_ZUO2 | MASK_ZUO1))
 	{
-		Track_StartSharpLeft();
+		Track_StartSharpLeft(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(mask == MASK_YOU2 || mask == (MASK_YOU1 | MASK_YOU2))
 	{
-		Track_StartSharpRight();
+		Track_StartSharpRight(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 
@@ -766,12 +770,12 @@ void Track_Control(void)
 	}
 	if(Track_ShouldCenterSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
 	{
-		Track_StartSharpLeft();
+		Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(Track_ShouldCenterSharpRight(mask) && track_state != TRACK_SHARP_RIGHT)
 	{
-		Track_StartSharpRight();
+		Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
@@ -784,12 +788,12 @@ void Track_Control(void)
 	}
 	if(Track_IsImmediateSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
 	{
-		Track_StartSharpLeft();
+		Track_StartSharpLeft(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 	if(Track_IsImmediateSharpRight(mask) && track_state != TRACK_SHARP_RIGHT)
 	{
-		Track_StartSharpRight();
+		Track_StartSharpRight(SHARP_MIN_PIVOT_TICKS);
 		return;
 	}
 
@@ -833,7 +837,7 @@ void Track_Control(void)
 
 		case TRACK_SHARP_LEFT:
 			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpLeft(mask) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
+			if(track_state_ticks >= sharp_min_pivot_ticks && !Track_IsImmediateSharpLeft(mask) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
 			{
 				Track_EnterState(TRACK_FOLLOW);
 				Track_NormalControl(mask, count);
@@ -846,7 +850,7 @@ void Track_Control(void)
 
 		case TRACK_SHARP_RIGHT:
 			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpRight(mask) && (mask & (MASK_YOU1 | MASK_ZHONG)))
+			if(track_state_ticks >= sharp_min_pivot_ticks && !Track_IsImmediateSharpRight(mask) && (mask & (MASK_YOU1 | MASK_ZHONG)))
 			{
 				Track_EnterState(TRACK_FOLLOW);
 				Track_NormalControl(mask, count);
