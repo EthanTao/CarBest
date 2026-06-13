@@ -84,26 +84,31 @@ bit PWM6_Flag;
 #define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
 
 #define HOLD_CURRENT_MS     110     /* 维持当前电机输出 */
-#define CROSS_HOLD_MS       100      /* 十字路口直行保持时间 */
+#define CROSS_HOLD_MS       110    /* 十字路口总直行保持时间 */
+#define NODE_CLASSIFY_TICKS 25     /* 单侧T字基础分类时间 */
+#define NODE_CROSS_CONFIRM_TICKS 50 /* 出现x111x后的十字延长确认时间 */
 #define UTURN_STOP_MS       500     /* 右掉头前停车时间 */
 
 #define MICRO_OUTER_PWM     85      /* 微型修正外侧轮速度 */
-#define MICRO_INNER_PWM     90      /* 微型修正内侧轮速度 */
+#define MICRO_INNER_PWM     75      /* 微型修正内侧轮速度 */
 #define MICRO_TO_SHARP_TICKS 20     /* 小修后允许大修抢占的时间 */
-#define CENTER_SHARP_WINDOW_TICKS 15 /* 中线和外侧传感器组合触发大弯的时间窗口 */
+#define CENTER_SHARP_WINDOW_TICKS 25 /* 中线和外侧传感器组合触发大弯的时间窗口 */
 #define MICRO_DIR_NONE       0
 #define MICRO_DIR_LEFT      -1
 #define MICRO_DIR_RIGHT      1
+#define NODE_HINT_NONE       0
+#define NODE_HINT_LEFT      -1
+#define NODE_HINT_RIGHT      1
 
-#define SHARP_FORWARD_PWM   75      /* 大型转弯正转轮速度 */
-#define SHARP_REVERSE_PWM    60     /* 大型转弯反转轮速度 */
+#define SHARP_FORWARD_PWM   85      /* 大型转弯正转轮速度 */
+#define SHARP_REVERSE_PWM    90     /* 大型转弯反转轮速度 */
 #define SHARP_MIN_PIVOT_TICKS 40    /* 大型修正最短强转时间 */
-#define CENTER_SHARP_MIN_PIVOT_TICKS 60 /* 中线+同侧外侧特殊大弯强转时间 */
+#define CENTER_SHARP_MIN_PIVOT_TICKS 70 /* 中线+同侧外侧特殊大弯强转时间 */
 
-#define UTURN_PWM           70      /* 右掉头左右轮等速反向速度 */
+#define UTURN_PWM           80      /* 右掉头左右轮等速反向速度 */
 
-#define LOST_CONFIRM_TICKS  40     /* 预留 */
-#define LOST_STRAIGHT_TICKS 30     /* 短暂全白保持上一输出时间 */
+#define LOST_CONFIRM_TICKS  50     /* 预留 */
+#define LOST_STRAIGHT_TICKS 40     /* 短暂全白保持上一输出时间 */
 
 #define MASK_ZUO2           0x10    /* 1号传感器：最左 */
 #define MASK_ZUO1           0x08    /* 2号传感器：左内 */
@@ -118,6 +123,7 @@ bit PWM6_Flag;
 #define TRACK_UTURN_RIGHT       3
 #define TRACK_SHARP_LEFT        4
 #define TRACK_SHARP_RIGHT       5
+#define TRACK_NODE_CLASSIFY     6
 
 signed char last_error = 0;
 u16 lost_ticks = 0;
@@ -126,7 +132,12 @@ int last_left_pwm = BASE_FAST;
 int last_right_pwm = BASE_FAST;
 u8 track_state = TRACK_FOLLOW;
 u16 track_state_ticks = 0;
-u8 cross_latched = 0;
+u8 node_latched = 0;
+u8 node_cross_seen = 0;
+u8 node_left_branch_seen = 0;
+u8 node_right_branch_seen = 0;
+u8 node_strong_cross = 0;
+signed char node_turn_hint = NODE_HINT_NONE;
 signed char micro_dir = MICRO_DIR_NONE;
 u8 micro_ticks = 0;
 u8 center_seen_ticks = CENTER_SHARP_WINDOW_TICKS + 1;
@@ -160,6 +171,11 @@ u8 Track_ShouldCenterSharpRight(u8 mask);
 u8 Track_ShouldMicroSharpLeft(u8 mask);
 u8 Track_ShouldMicroSharpRight(u8 mask);
 u8 Track_HandleLostUturn(u8 count);
+u8 Track_IsNarrowLine(u8 mask);
+u8 Track_IsNodeCandidate(u8 mask);
+void Track_ClearNodeClassify(void);
+void Track_StartNodeClassify(u8 mask);
+void Track_StartCrossHold(u16 elapsed_ticks);
 void Track_EnterState(u8 state);
 void Track_StartSharpLeft(u16 min_pivot_ticks);
 void Track_StartSharpRight(u16 min_pivot_ticks);
@@ -580,6 +596,59 @@ u8 Track_ShouldCenterSharpRight(u8 mask)
 	return 1;
 }
 
+u8 Track_IsNarrowLine(u8 mask)
+{
+	return (mask != 0 && !(mask & (MASK_ZUO2 | MASK_YOU2)) && !IsCrossMask(mask));
+}
+
+u8 Track_IsNodeCandidate(u8 mask)
+{
+	return (IsCrossMask(mask) || Track_ShouldCenterSharpLeft(mask) || Track_ShouldCenterSharpRight(mask));
+}
+
+void Track_ClearNodeClassify(void)
+{
+	node_cross_seen = 0;
+	node_left_branch_seen = 0;
+	node_right_branch_seen = 0;
+	node_strong_cross = 0;
+	node_turn_hint = NODE_HINT_NONE;
+}
+
+void Track_StartNodeClassify(u8 mask)
+{
+	u8 hint_left;
+	u8 hint_right;
+
+	Track_ClearMicroWindow();
+	Track_ClearNodeClassify();
+	node_latched = 1;
+	node_cross_seen = IsCrossMask(mask);
+	node_left_branch_seen = Track_IsImmediateSharpLeft(mask);
+	node_right_branch_seen = Track_IsImmediateSharpRight(mask);
+	if(mask == MASK_ALL || (node_left_branch_seen && node_right_branch_seen)) node_strong_cross = 1;
+
+	/* 直接x111x按无方向路口处理；否则记录最初的单侧特殊转弯提示。 */
+	if(!node_cross_seen)
+	{
+		hint_left = Track_ShouldCenterSharpLeft(mask);
+		hint_right = Track_ShouldCenterSharpRight(mask);
+		if(hint_left && !hint_right) node_turn_hint = NODE_HINT_LEFT;
+		else if(hint_right && !hint_left) node_turn_hint = NODE_HINT_RIGHT;
+	}
+
+	Track_EnterState(TRACK_NODE_CLASSIFY);
+	Motor_RunSafe(BASE_NODE, BASE_NODE);
+}
+
+void Track_StartCrossHold(u16 elapsed_ticks)
+{
+	Track_ClearMicroWindow();
+	Track_ClearCenterSharpWindow();
+	Track_EnterState(TRACK_CROSS_HOLD);
+	track_state_ticks = elapsed_ticks;
+	Motor_RunSafe(BASE_NODE, BASE_NODE);
+}
 u8 Track_HandleLostUturn(u8 count)
 {
 	if(count != 0)
@@ -611,6 +680,7 @@ void Track_StartSharpLeft(u16 min_pivot_ticks)
 {
 	Track_ClearMicroWindow();
 	Track_ClearCenterSharpWindow();
+	lost_ticks = 0;
 	last_error = -4;
 	sharp_min_pivot_ticks = min_pivot_ticks;
 	Track_EnterState(TRACK_SHARP_LEFT);
@@ -621,6 +691,7 @@ void Track_StartSharpRight(u16 min_pivot_ticks)
 {
 	Track_ClearMicroWindow();
 	Track_ClearCenterSharpWindow();
+	lost_ticks = 0;
 	last_error = 4;
 	sharp_min_pivot_ticks = min_pivot_ticks;
 	Track_EnterState(TRACK_SHARP_RIGHT);
@@ -639,46 +710,24 @@ void Track_ResetStraight(void)
 
 void Track_NormalControl(u8 mask, u8 count)
 {
-	/* 00100：最高优先级，立即回正并清空小修窗口 */
+	/* 路口候选统一先进入25ms分类，避免十字被单侧外沿误判为大弯 */
+	if(!node_latched && Track_IsNodeCandidate(mask))
+	{
+		Track_StartNodeClassify(mask);
+		return;
+	}
+
 	if(mask == MASK_ZHONG)
 	{
 		Track_ResetStraight();
 		return;
 	}
 
-	/* 00000：连续达到确认时间后立即原地右掉头 */
 	if(Track_HandleLostUturn(count))
 	{
 		return;
 	}
 
-	/* 30ms内中线+同侧外侧组合时抢占为大幅修正 */
-	if(Track_ShouldCenterSharpLeft(mask))
-	{
-		Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
-		return;
-	}
-	if(Track_ShouldCenterSharpRight(mask))
-	{
-		Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
-		return;
-	}
-
-	/* x111x：十字路口直行保持，优先级高于大弯 */
-	if(IsCrossMask(mask))
-	{
-		Track_ClearMicroWindow();
-		if(!cross_latched)
-		{
-			cross_latched = 1;
-			Track_EnterState(TRACK_CROSS_HOLD);
-			Motor_RunSafe(BASE_NODE, BASE_NODE);
-			return;
-		}
-		last_error = 0;
-		Motor_RunSafe(BASE_NODE, BASE_NODE);
-		return;
-	}
 
 	/* 1xx00/00xx1：立即大弯，但低于掉头和十字直行 */
 	if(Track_IsImmediateSharpLeft(mask))
@@ -752,12 +801,134 @@ void Track_Control(void)
 {
 	u8 mask;
 	u8 count;
+	u8 hint_left;
+	u8 hint_right;
+	u16 node_classify_limit;
 
 	mask = ReadTrackSensors();
 	count = CountBits(mask);
 	if(count > 0) lost_ticks = 0;
 	Track_TickMicroWindow();
 	Track_TickCenterSharpWindow(mask);
+
+	/* 十字确认后锁定直行，直到总计CROSS_HOLD_MS结束 */
+	if(track_state == TRACK_CROSS_HOLD)
+	{
+		Motor_RunSafe(BASE_NODE, BASE_NODE);
+		if(track_state_ticks < 60000) track_state_ticks++;
+		if(track_state_ticks >= CROSS_HOLD_MS)
+		{
+			Track_EnterState(TRACK_FOLLOW);
+			Track_ClearNodeClassify();
+			Track_NormalControl(mask, count);
+		}
+		return;
+	}
+
+	/* 分类期间只直行采样，不响应回正、掉头或任何转弯抢占 */
+	if(track_state == TRACK_NODE_CLASSIFY)
+	{
+		if(IsCrossMask(mask)) node_cross_seen = 1;
+		if(Track_IsImmediateSharpLeft(mask)) node_left_branch_seen = 1;
+		if(Track_IsImmediateSharpRight(mask)) node_right_branch_seen = 1;
+		if(mask == MASK_ALL || (node_left_branch_seen && node_right_branch_seen)) node_strong_cross = 1;
+
+		/* 持续收集单侧提示，避免候选入口恰好落在两次采样之间。 */
+		hint_left = Track_ShouldCenterSharpLeft(mask);
+		hint_right = Track_ShouldCenterSharpRight(mask);
+		if(hint_left && !hint_right) node_turn_hint = NODE_HINT_LEFT;
+		else if(hint_right && !hint_left) node_turn_hint = NODE_HINT_RIGHT;
+
+		Motor_RunSafe(BASE_NODE, BASE_NODE);
+		if(track_state_ticks < 60000) track_state_ticks++;
+
+		/* 只有11111或左右完整分支形态都出现，才提前确认真十字。 */
+		if(node_strong_cross)
+		{
+			Track_StartCrossHold(track_state_ticks);
+			return;
+		}
+
+		node_classify_limit = NODE_CLASSIFY_TICKS;
+		if(node_cross_seen) node_classify_limit = NODE_CROSS_CONFIRM_TICKS;
+		if(track_state_ticks >= node_classify_limit)
+		{
+			if(node_left_branch_seen && !node_right_branch_seen)
+			{
+				Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
+			}
+			else if(node_right_branch_seen && !node_left_branch_seen)
+			{
+				Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
+			}
+			else if(node_cross_seen)
+			{
+				Track_StartCrossHold(track_state_ticks);
+			}
+			else if(node_turn_hint == NODE_HINT_LEFT)
+			{
+				Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
+			}
+			else if(node_turn_hint == NODE_HINT_RIGHT)
+			{
+				Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
+			}
+			else
+			{
+				node_latched = 0;
+				Track_ClearNodeClassify();
+				Track_EnterState(TRACK_FOLLOW);
+				Track_NormalControl(mask, count);
+			}
+		}
+		return;
+	}
+
+	/* 大弯状态优先锁定，避免被回正、掉头或全局抢占提前打断。 */
+	if(track_state == TRACK_SHARP_LEFT)
+	{
+		if(track_state_ticks < 60000) track_state_ticks++;
+		if(track_state_ticks >= sharp_min_pivot_ticks && mask != 0 &&
+		   !Track_IsImmediateSharpLeft(mask) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
+		{
+			Track_EnterState(TRACK_FOLLOW);
+			Track_NormalControl(mask, count);
+		}
+		else
+		{
+			Motor_RunSigned(-SHARP_REVERSE_PWM, SHARP_FORWARD_PWM);
+		}
+		return;
+	}
+
+	if(track_state == TRACK_SHARP_RIGHT)
+	{
+		if(track_state_ticks < 60000) track_state_ticks++;
+		if(track_state_ticks >= sharp_min_pivot_ticks && mask != 0 &&
+		   !Track_IsImmediateSharpRight(mask) && (mask & (MASK_YOU1 | MASK_ZHONG)))
+		{
+			Track_EnterState(TRACK_FOLLOW);
+			Track_NormalControl(mask, count);
+		}
+		else
+		{
+			Motor_RunSigned(SHARP_FORWARD_PWM, -SHARP_REVERSE_PWM);
+		}
+		return;
+	}
+	/* 确认驶离节点并恢复窄线后，允许识别下一个路口 */
+	if(node_latched && track_state == TRACK_FOLLOW && Track_IsNarrowLine(mask))
+	{
+		node_latched = 0;
+		Track_ClearNodeClassify();
+	}
+
+	/* 十字和单侧T字使用同一个分类入口 */
+	if(!node_latched && Track_IsNodeCandidate(mask))
+	{
+		Track_StartNodeClassify(mask);
+		return;
+	}
 
 	if(mask == MASK_ZHONG)
 	{
@@ -766,24 +937,6 @@ void Track_Control(void)
 	}
 	if(Track_HandleLostUturn(count))
 	{
-		return;
-	}
-	if(Track_ShouldCenterSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
-	{
-		Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
-		return;
-	}
-	if(Track_ShouldCenterSharpRight(mask) && track_state != TRACK_SHARP_RIGHT)
-	{
-		Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
-		return;
-	}
-	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
-	{
-		Track_ClearMicroWindow();
-		cross_latched = 1;
-		Track_EnterState(TRACK_CROSS_HOLD);
-		Motor_RunSafe(BASE_NODE, BASE_NODE);
 		return;
 	}
 	if(Track_IsImmediateSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
@@ -797,27 +950,8 @@ void Track_Control(void)
 		return;
 	}
 
-	if(!IsCrossMask(mask))
-	{
-		cross_latched = 0;
-	}
-
 	switch(track_state)
 	{
-		case TRACK_CROSS_HOLD:
-			if(Track_HandleLostUturn(count))
-			{
-				return;
-			}
-			Motor_RunSafe(BASE_NODE, BASE_NODE);
-			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= CROSS_HOLD_MS)
-			{
-				Track_EnterState(TRACK_FOLLOW);
-				Track_NormalControl(mask, count);
-			}
-			return;
-
 		case TRACK_UTURN_STOP:
 			Track_EnterState(TRACK_UTURN_RIGHT);
 			Motor_RunSigned(UTURN_PWM, -UTURN_PWM);
@@ -835,32 +969,6 @@ void Track_Control(void)
 			}
 			return;
 
-		case TRACK_SHARP_LEFT:
-			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= sharp_min_pivot_ticks && !Track_IsImmediateSharpLeft(mask) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
-			{
-				Track_EnterState(TRACK_FOLLOW);
-				Track_NormalControl(mask, count);
-			}
-			else
-			{
-				Motor_RunSigned(-SHARP_REVERSE_PWM, SHARP_FORWARD_PWM);
-			}
-			return;
-
-		case TRACK_SHARP_RIGHT:
-			if(track_state_ticks < 60000) track_state_ticks++;
-			if(track_state_ticks >= sharp_min_pivot_ticks && !Track_IsImmediateSharpRight(mask) && (mask & (MASK_YOU1 | MASK_ZHONG)))
-			{
-				Track_EnterState(TRACK_FOLLOW);
-				Track_NormalControl(mask, count);
-			}
-			else
-			{
-				Motor_RunSigned(SHARP_FORWARD_PWM, -SHARP_REVERSE_PWM);
-			}
-			return;
-
 		case TRACK_FOLLOW:
 			break;
 
@@ -871,7 +979,6 @@ void Track_Control(void)
 
 	Track_NormalControl(mask, count);
 }
-
 void Timer2_ISR_Handler (void) interrupt TMR2_VECTOR		//进中断时已经清除标志
 {
 	/* Timer2每100us进一次，这里分频到约1ms执行控制，优先保证响应及时 */
