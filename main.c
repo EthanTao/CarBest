@@ -107,7 +107,7 @@ bit PWM6_Flag;
 #define SHARP_MIN_PIVOT_TICKS 30    /* 急转弯最短强制转时间 */
 #define CENTER_SHARP_MIN_PIVOT_TICKS 35 /* 窗口急弯强制转时间 */
 
-#define UTURN_PWM           90      /* 调头速度 */
+#define UTURN_PWM           80      /* 调头速度 */
 
 #define LOST_CONFIRM_TICKS  70    /* 丢线确认掉头阈值（折线防误触） */
 #define LOST_STRAIGHT_TICKS 30     /* 丢线全黑补线保持时间 */
@@ -924,6 +924,39 @@ void Track_Control(void)
 	{
 		return;
 	}
+	/* 十字预判1：最近见过中 + 单侧全亮(对面全暗) = 十字接近 */
+	if(!IsCrossMask(mask) && Track_IsCenterSharpWindowActive(center_seen_ticks)
+	   && track_state != TRACK_CROSS_HOLD)
+	{
+		if((mask & (MASK_YOU1 | MASK_YOU2)) == (MASK_YOU1 | MASK_YOU2)
+		   && !(mask & (MASK_ZUO1 | MASK_ZUO2)))
+		{
+			Track_ClearMicroWindow();
+			cross_latched = 1;
+			Track_EnterState(TRACK_CROSS_HOLD);
+			Motor_RunSigned(BASE_NODE, BASE_NODE);
+			return;
+		}
+		if((mask & (MASK_ZUO1 | MASK_ZUO2)) == (MASK_ZUO1 | MASK_ZUO2)
+		   && !(mask & (MASK_YOU1 | MASK_YOU2)))
+		{
+			Track_ClearMicroWindow();
+			cross_latched = 1;
+			Track_EnterState(TRACK_CROSS_HOLD);
+			Motor_RunSigned(BASE_NODE, BASE_NODE);
+			return;
+		}
+	}
+	/* 十字预判2：≥3传感器 + 最近见过中 */
+	if(!IsCrossMask(mask) && Track_IsCenterSharpWindowActive(center_seen_ticks)
+	   && count >= 3 && track_state != TRACK_CROSS_HOLD)
+	{
+		Track_ClearMicroWindow();
+		cross_latched = 1;
+		Track_EnterState(TRACK_CROSS_HOLD);
+		Motor_RunSigned(BASE_NODE, BASE_NODE);
+		return;
+	}
 	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
 	{
 		Track_ClearMicroWindow();
@@ -967,13 +1000,33 @@ void Track_Control(void)
 			}
 			Motor_RunSigned(BASE_NODE, BASE_NODE);
 			if(track_state_ticks < 60000) track_state_ticks++;
+			/* 满110ms后：干净单线→退出 | 全白→掉头 | 否则→继续等 */
 			if(track_state_ticks >= CROSS_HOLD_MS)
 			{
+				if(count == 0)
+				{
+					/* 全白 → 掉头找线 */
+					Track_ClearMicroWindow();
+					Track_EnterState(TRACK_UTURN_RIGHT);
+					Motor_RunSigned(UTURN_PWM, -UTURN_PWM);
+					return;
+				}
+				if(count <= 2)
+				{
+					post_sharp_grace = POST_SHARP_GRACE_TICKS;
+					Track_EnterState(TRACK_FOLLOW);
+					Track_NormalControl(mask, count);
+					return;
+				}
+			}
+			if(track_state_ticks > CROSS_HOLD_MS + 100)
+			{
+				/* 超时强制退出 */
+				post_sharp_grace = POST_SHARP_GRACE_TICKS;
 				Track_EnterState(TRACK_FOLLOW);
 				Track_NormalControl(mask, count);
 			}
 			return;
-
 		case TRACK_UTURN_STOP:
 			Track_EnterState(TRACK_UTURN_RIGHT);
 			Motor_RunSigned(UTURN_PWM, -UTURN_PWM);
