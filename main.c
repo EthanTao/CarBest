@@ -75,42 +75,42 @@ bit PWM6_Flag;
 #define LINE_ON             1       /* 黑线有效电平：黑线=1，白底=0 */
 #define CTRL_DIV_1MS        10      /* Timer2为100us中断，10次执行一次循迹，约1ms */
 
-#define BASE_FAST           85      /* 00100直行速度 */
-#define BASE_NODE           78      /* 十字判定后仍压在线上时的直行速度 */
-#define MAX_PWM             92      /* PWM最大限幅 */
-#define MIN_RUN_PWM         55      /* 非停车正转时最低PWM */
+#define BASE_FAST          	95     /* 00100直行速度 */
+#define BASE_NODE           95     /* 十字判定后仍压在线上时的直行速度 */
+#define MAX_PWM             100     /* PWM最大限幅 */
+#define MIN_RUN_PWM         70      /* 非停车正转时最低PWM */
 #define STALL_MARGIN        10       /* 低压防停转余量 */
 #define LEFT_TRIM           1       /* 左轮平衡偏置，范围-10~10 */
 #define RIGHT_TRIM          3       /* 右轮平衡偏置，范围-10~10 */
-#define LOST_TURN_PWM       80      /* 持续全白后按上次方向找线速度 */
+#define LOST_TURN_PWM       95      /* 持续全白后按上次方向找线速度 */
 
 #define HOLD_CURRENT_MS     110     /* 维持当前电机输出 */
 #define CROSS_HOLD_MS       80      /* 十字路口直行保持时间 */
 #define UTURN_STOP_MS       500     /* 右掉头前停车时间 */
 
-#define MICRO_OUTER_PWM     75      /* 微型修正外侧轮速度 */
-#define MICRO_INNER_PWM     70      /* 微型修正内侧轮速度 */
+#define MICRO_OUTER_PWM     98      /* 微型修正外侧轮速度 */
+#define MICRO_INNER_PWM     92      /* 微型修正内侧轮速度 */
 #define MICRO_TO_SHARP_TICKS 20     /* 小修后允许大修抢占的时间 */
 #define CENTER_SHARP_WINDOW_TICKS 20 /* 中线和外侧传感器组合触发大弯的时间窗口 */
-#define MICRO_DIR_NONE       0
-#define MICRO_DIR_LEFT      -1
-#define MICRO_DIR_RIGHT      1
+#define MICRO_DIR_NONE       0      /* 微修方向：无修正 */
+#define MICRO_DIR_LEFT      -1      /* 微修方向：左转修正 */
+#define MICRO_DIR_RIGHT      1      /* 微修方向：右转修正 */
 
-#define SHARP_FORWARD_PWM   70      /* 大型转弯正转轮速度 */
-#define SHARP_REVERSE_PWM   90      /* 大型转弯反转轮速度 */
+#define SHARP_FORWARD_PWM   95      /* 大型转弯正转轮速度 */
+#define SHARP_REVERSE_PWM   100     /* 大型转弯反转轮速度 */
 #define SHARP_MIN_PIVOT_TICKS 70    /* 大型修正最短强转时间 */
 
 /* PID 循迹控制参数 */
 #define PID_KP              5      /* 比例系数 */
 #define PID_KI              2      /* 积分系数，消除稳态误差 */
-#define PID_KD              15     /* 微分系数,抑制震荡 */
+#define PID_KD              25     /* 微分系数,抑制震荡 */
 #define PID_INTEGRAL_MAX    20    /* 积分限幅,防止积分饱和 */
 #define PID_OUTPUT_MAX      20	   /* PID单侧最大输出限幅 */
 
-#define UTURN_PWM           80      /* 右掉头左右轮等速反向速度 */
+#define UTURN_PWM           95      /* 右掉头左右轮等速反向速度 */
 
-#define LOST_CONFIRM_TICKS  60     /* 预留：120*1ms=120ms */
-#define LOST_STRAIGHT_TICKS 30     /* 短暂全白保持上一输出时间 */
+#define LOST_CONFIRM_TICKS  80   	/* 阶段2偏转上限 / 阶段3掉头触发时间(ms) */
+#define LOST_STRAIGHT_TICKS 50     	/* 阶段1直行冲死区时间(ms) */
 
 #define MASK_ZUO2           0x10    /* 1号传感器：最左 */
 #define MASK_ZUO1           0x08    /* 2号传感器：左内 */
@@ -173,6 +173,8 @@ u8 Track_ShouldCenterSharpRight(u8 mask);
 u8 Track_ShouldMicroSharpLeft(u8 mask);
 void Track_PIDControl(u8 mask);
 u8 Track_ShouldMicroSharpRight(u8 mask);
+u8 Track_ShouldStartMicroLeft(u8 mask);
+u8 Track_ShouldStartMicroRight(u8 mask);
 u8 Track_HandleLostUturn(u8 count);
 void Track_EnterState(u8 state);
 void Track_StartSharpLeft(void);
@@ -300,6 +302,20 @@ void Track_NormalControl(u8 mask, u8 count)
 		return;
 	}
 
+	/* 微型修正：内侧触发同侧外侧未触发 -> 差速微调 */
+	if(Track_ShouldStartMicroLeft(mask))
+	{
+		Track_RecordMicro(MICRO_DIR_LEFT);
+		Motor_RunSafe(MICRO_INNER_PWM, MICRO_OUTER_PWM);
+		return;
+	}
+	if(Track_ShouldStartMicroRight(mask))
+	{
+		Track_RecordMicro(MICRO_DIR_RIGHT);
+		Motor_RunSafe(MICRO_OUTER_PWM, MICRO_INNER_PWM);
+		return;
+	}
+
 	/* === PID 正常循迹 (处理所有中间情况) === */
 	Track_PIDControl(mask);
 }
@@ -383,9 +399,6 @@ unsigned int Ultrasonic_GetDistance(void)
 void	PWM_config(void)
 {
 	PWMx_InitDefine		PWMx_InitStructure;
-	
-//	PWMB_Duty.PWM5_Duty = 128;
-//	PWMB_Duty.PWM6_Duty = 256;
 
 	PWMx_InitStructure.PWM_Mode    =	CCMRn_PWM_MODE1;
 	PWMx_InitStructure.PWM_Duty    = PWMB_Duty.PWM5_Duty;
@@ -546,7 +559,8 @@ void Motor_RunSafe(int left_pwm, int right_pwm)
 	left_pwm = LimitPwm(left_pwm);
 	right_pwm = LimitPwm(right_pwm);
 
-	if(left_pwm < MIN_RUN_PWM) left_pwm = MIN_RUN_PWM;
+	if(left_pwm < MIN_RUN_PWM + STALL_MARGIN)
+		left_pwm = MIN_RUN_PWM + STALL_MARGIN;
 	if(right_pwm < MIN_RUN_PWM + STALL_MARGIN)
 		right_pwm = MIN_RUN_PWM + STALL_MARGIN;
 
@@ -671,11 +685,26 @@ u8 Track_ShouldMicroSharpRight(u8 mask)
 	return (micro_dir == MICRO_DIR_RIGHT && (mask & MASK_YOU2) && (mask & (MASK_YOU1 | MASK_ZHONG)));
 }
 
+/* 微修左启动条件：内侧ZUO1触发且同侧外侧ZUO2未触发 */
+u8 Track_ShouldStartMicroLeft(u8 mask)
+{
+	return ((mask & MASK_ZUO1) && !(mask & MASK_ZUO2));
+}
+
+/* 微修右启动条件：内侧YOU1触发且同侧外侧YOU2未触发 */
+u8 Track_ShouldStartMicroRight(u8 mask)
+{
+	return ((mask & MASK_YOU1) && !(mask & MASK_YOU2));
+}
+
 u8 Track_ShouldCenterSharpLeft(u8 mask)
 {
 	u8 center_recent;
 	u8 left_recent;
 	u8 right_recent;
+
+	/* 当前必须真的看到最左侧传感器，否则不可能是左急弯 */
+	if(!(mask & MASK_ZUO2)) return 0;
 
 	center_recent = Track_IsCenterSharpWindowActive(center_seen_ticks);
 	left_recent = Track_IsCenterSharpWindowActive(left_outer_seen_ticks);
@@ -684,7 +713,7 @@ u8 Track_ShouldCenterSharpLeft(u8 mask)
 	if(!center_recent || !left_recent) return 0;
 	if(left_recent && right_recent)
 	{
-		return ((mask & MASK_ZUO2) && !(mask & MASK_YOU2));
+		return !(mask & MASK_YOU2);
 	}
 	return 1;
 }
@@ -695,6 +724,9 @@ u8 Track_ShouldCenterSharpRight(u8 mask)
 	u8 left_recent;
 	u8 right_recent;
 
+	/* 当前必须真的看到最右侧传感器，否则不可能是右急弯 */
+	if(!(mask & MASK_YOU2)) return 0;
+
 	center_recent = Track_IsCenterSharpWindowActive(center_seen_ticks);
 	left_recent = Track_IsCenterSharpWindowActive(left_outer_seen_ticks);
 	right_recent = Track_IsCenterSharpWindowActive(right_outer_seen_ticks);
@@ -702,7 +734,7 @@ u8 Track_ShouldCenterSharpRight(u8 mask)
 	if(!center_recent || !right_recent) return 0;
 	if(left_recent && right_recent)
 	{
-		return ((mask & MASK_YOU2) && !(mask & MASK_ZUO2));
+		return !(mask & MASK_ZUO2);
 	}
 	return 1;
 }
@@ -714,13 +746,33 @@ u8 Track_HandleLostUturn(u8 count)
 		return 0;
 	}
 
-	if(lost_ticks < 60000) lost_ticks++;
-	if(lost_ticks < LOST_CONFIRM_TICKS)
+	/* 急转弯/掉头中不拦截丢线 —— 让各自的状态机继续控制电机 */
+	if(track_state == TRACK_SHARP_LEFT  || track_state == TRACK_SHARP_RIGHT ||
+	   track_state == TRACK_UTURN_RIGHT || track_state == TRACK_UTURN_STOP)
 	{
-		Motor_HoldLast();
+		return 0;
+	}
+
+	if(lost_ticks < 60000) lost_ticks++;
+
+	if(lost_ticks < LOST_STRAIGHT_TICKS)
+	{
+		/* 阶段1: 短暂丢线 -> 直行冲过死区（转弯后/十字路口后常见） */
+		Motor_RunSafe(BASE_FAST, BASE_FAST);
+	}
+	else if(lost_ticks < LOST_CONFIRM_TICKS)
+	{
+		/* 阶段2: 持续丢线 -> 按上次方向偏转找线 */
+		if(last_error < 0)
+			Motor_RunSafe(BASE_FAST - 15, BASE_FAST + 15);
+		else if(last_error > 0)
+			Motor_RunSafe(BASE_FAST + 15, BASE_FAST - 15);
+		else
+			Motor_RunSafe(BASE_FAST, BASE_FAST);
 	}
 	else
 	{
+		/* 阶段3: 丢失太久 -> 原地掉头找线 */
 		Track_ClearMicroWindow();
 		Track_EnterState(TRACK_UTURN_RIGHT);
 		Motor_RunSigned(UTURN_PWM, -UTURN_PWM);
@@ -740,6 +792,7 @@ void Track_StartSharpLeft(void)
 	Track_ClearCenterSharpWindow();
 	pid_integral = 0;
 	last_error = -4;
+	lost_ticks = 0;
 	Track_EnterState(TRACK_SHARP_LEFT);
 	Motor_RunSigned(-SHARP_REVERSE_PWM, SHARP_FORWARD_PWM);
 }
@@ -750,6 +803,7 @@ void Track_StartSharpRight(void)
 	Track_ClearCenterSharpWindow();
 	pid_integral = 0;
 	last_error = 4;
+	lost_ticks = 0;
 	Track_EnterState(TRACK_SHARP_RIGHT);
 	Motor_RunSigned(SHARP_FORWARD_PWM, -SHARP_REVERSE_PWM);
 }
@@ -776,6 +830,16 @@ void Track_Control(void)
 	Track_TickMicroWindow();
 	Track_TickCenterSharpWindow(mask);
 
+	/* 十字路口最高优先级 —— 任何情况都不能让十字路口被误判 */
+	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
+	{
+		Track_ClearMicroWindow();
+		Track_ClearCenterSharpWindow();
+		cross_latched = 1;
+		Track_EnterState(TRACK_CROSS_HOLD);
+		Motor_RunSafe(BASE_NODE, BASE_NODE);
+		return;
+	}
 	if(mask == MASK_ZHONG)
 	{
 		Track_ResetStraight();
@@ -795,20 +859,24 @@ void Track_Control(void)
 		Track_StartSharpRight();
 		return;
 	}
-	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
-	{
-		Track_ClearMicroWindow();
-		cross_latched = 1;
-		Track_EnterState(TRACK_CROSS_HOLD);
-		Motor_RunSafe(BASE_NODE, BASE_NODE);
-		return;
-	}
 	if(Track_IsImmediateSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
 	{
 		Track_StartSharpLeft();
 		return;
 	}
 	if(Track_IsImmediateSharpRight(mask) && track_state != TRACK_SHARP_RIGHT)
+	{
+		Track_StartSharpRight();
+		return;
+	}
+
+	/* 微修升级兜底：微修进行中外侧传感器触发 -> 升级为急转弯 */
+	if(Track_ShouldMicroSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
+	{
+		Track_StartSharpLeft();
+		return;
+	}
+	if(Track_ShouldMicroSharpRight(mask) && track_state != TRACK_SHARP_RIGHT)
 	{
 		Track_StartSharpRight();
 		return;
@@ -831,6 +899,8 @@ void Track_Control(void)
 			if(track_state_ticks >= CROSS_HOLD_MS)
 			{
 				Track_EnterState(TRACK_FOLLOW);
+				Track_ClearCenterSharpWindow();
+				last_error = 0;
 				Track_NormalControl(mask, count);
 			}
 			return;
@@ -857,6 +927,7 @@ void Track_Control(void)
 			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpLeft(mask) && !(mask & MASK_ZUO2) && (mask & (MASK_ZUO1 | MASK_ZHONG)))
 			{
 				Track_EnterState(TRACK_FOLLOW);
+				last_error = 0;
 				Track_NormalControl(mask, count);
 			}
 			else
@@ -870,6 +941,7 @@ void Track_Control(void)
 			if(track_state_ticks >= SHARP_MIN_PIVOT_TICKS && !Track_IsImmediateSharpRight(mask) && !(mask & MASK_YOU2) && (mask & (MASK_YOU1 | MASK_ZHONG)))
 			{
 				Track_EnterState(TRACK_FOLLOW);
+				last_error = 0;
 				Track_NormalControl(mask, count);
 			}
 			else

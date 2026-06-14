@@ -8,3 +8,6 @@ list/
 *.lnp
 *.map
 *.build_log.htm
+
+# Claude Code local settings
+.claude/
