@@ -102,8 +102,8 @@ bit PWM6_Flag;
 #define BRAKE_PHASE_COAST    1       /* 惰行中 */
 #define BRAKE_PHASE_KICK     2       /* 过冲满扭中 */
 
-#define SHARP_FORWARD_PWM   90      /* 急转弯外侧正转速度 */
-#define SHARP_REVERSE_PWM    110    /* 急转弯内侧反转速度（加大快速旋转） */
+#define SHARP_FORWARD_PWM   95      /* 急转弯外侧正转速度 */
+#define SHARP_REVERSE_PWM    115    /* 急转弯内侧反转速度（加大快速旋转） */
 #define SHARP_MIN_PIVOT_TICKS 30    /* 急转弯最短强制转时间 */
 #define CENTER_SHARP_MIN_PIVOT_TICKS 35 /* 窗口急弯强制转时间 */
 
@@ -587,7 +587,16 @@ u8 CountBits(u8 mask)
 
 u8 IsCrossMask(u8 mask)
 {
-	return ((mask & (MASK_ZUO1 | MASK_ZHONG | MASK_YOU1)) == (MASK_ZUO1 | MASK_ZHONG | MASK_YOU1));
+	u8 has_left, has_right;
+	/* x111x 标准十字 */
+	if((mask & (MASK_ZUO1 | MASK_ZHONG | MASK_YOU1)) == (MASK_ZUO1 | MASK_ZHONG | MASK_YOU1))
+		return 1;
+	/* 十字非对称接近：中间亮 + 左右两侧都有传感器（排除单侧大弯） */
+	has_left  = mask & (MASK_ZUO2 | MASK_ZUO1);
+	has_right = mask & (MASK_YOU1 | MASK_YOU2);
+	if((mask & MASK_ZHONG) && has_left && has_right)
+		return 1;
+	return 0;
 }
 
 u8 Track_IsImmediateSharpLeft(u8 mask)
@@ -795,7 +804,23 @@ void Track_NormalControl(u8 mask, u8 count)
 		return;
 	}
 
-	/* 30ms内中间+同向外传感器时间窗触发为急转弯 */
+	/* 十字路口优先于窗口急弯，防止右侧分支被误判为急转弯 */
+	if(IsCrossMask(mask))
+	{
+		Track_ClearMicroWindow();
+		if(!cross_latched)
+		{
+			cross_latched = 1;
+			Track_EnterState(TRACK_CROSS_HOLD);
+			Motor_RunSigned(BASE_NODE, BASE_NODE);
+			return;
+		}
+		last_error = 0;
+		Motor_RunSigned(BASE_NODE, BASE_NODE);
+		return;
+	}
+
+	/* 窗口急弯 */
 	if(Track_ShouldCenterSharpLeft(mask))
 	{
 		Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
@@ -807,21 +832,6 @@ void Track_NormalControl(u8 mask, u8 count)
 		return;
 	}
 
-	/* x111x是十字路口直行保持，优先级低于急弯 */
-	if(IsCrossMask(mask))
-	{
-		Track_ClearMicroWindow();
-		if(!cross_latched)
-		{
-			cross_latched = 1;
-			Track_EnterState(TRACK_CROSS_HOLD);
-			Motor_RunSafe(BASE_NODE, BASE_NODE);
-			return;
-		}
-		last_error = 0;
-		Motor_RunSafe(BASE_NODE, BASE_NODE);
-		return;
-	}
 
 	/* 1xx00/00xx1是急转弯，低于掉头和十字直行 */
 	if(Track_IsImmediateSharpLeft(mask))
@@ -884,7 +894,7 @@ void Track_NormalControl(u8 mask, u8 count)
 	if(mask & MASK_ZHONG)
 	{
 		last_error = 0;
-		Motor_RunSafe(BASE_NODE, BASE_NODE);
+		Motor_RunSigned(BASE_NODE, BASE_NODE);
 		return;
 	}
 
@@ -914,6 +924,14 @@ void Track_Control(void)
 	{
 		return;
 	}
+	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
+	{
+		Track_ClearMicroWindow();
+		cross_latched = 1;
+		Track_EnterState(TRACK_CROSS_HOLD);
+		Motor_RunSigned(BASE_NODE, BASE_NODE);
+		return;
+	}
 	if(Track_ShouldCenterSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
 	{
 		Track_StartSharpLeft(CENTER_SHARP_MIN_PIVOT_TICKS);
@@ -922,14 +940,6 @@ void Track_Control(void)
 	if(Track_ShouldCenterSharpRight(mask) && track_state != TRACK_SHARP_RIGHT)
 	{
 		Track_StartSharpRight(CENTER_SHARP_MIN_PIVOT_TICKS);
-		return;
-	}
-	if(IsCrossMask(mask) && track_state != TRACK_CROSS_HOLD)
-	{
-		Track_ClearMicroWindow();
-		cross_latched = 1;
-		Track_EnterState(TRACK_CROSS_HOLD);
-		Motor_RunSafe(BASE_NODE, BASE_NODE);
 		return;
 	}
 	if(Track_IsImmediateSharpLeft(mask) && track_state != TRACK_SHARP_LEFT)
@@ -955,7 +965,7 @@ void Track_Control(void)
 			{
 				return;
 			}
-			Motor_RunSafe(BASE_NODE, BASE_NODE);
+			Motor_RunSigned(BASE_NODE, BASE_NODE);
 			if(track_state_ticks < 60000) track_state_ticks++;
 			if(track_state_ticks >= CROSS_HOLD_MS)
 			{
